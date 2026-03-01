@@ -1,33 +1,41 @@
-/*
- * Copyright (c) 2016 Open-RnD Sp. z o.o.
- * Copyright (c) 2020 Nordic Semiconductor ASA
- *
- * SPDX-License-Identifier: Apache-2.0
- *
- * NOTE: If you are looking into an implementation of button events with
- * debouncing, check out `input` subsystem and `samples/subsys/input/input_dump`
- * example instead.
- */
-
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/sys/util.h>
 #include <zephyr/sys/printk.h>
-#include <inttypes.h>
 
-#define SLEEP_TIME_MS	1
+#define SLEEP_TIME_MS 100
 
-/*
- * Get button configuration from the devicetree sw0 alias. This is mandatory.
- */
-#define SW0_NODE	DT_ALIAS(sw0)
-#if !DT_NODE_HAS_STATUS_OKAY(SW0_NODE)
-#error "Unsupported board: sw0 devicetree alias is not defined"
+#define ROW1_NODE DT_ALIAS(row1)
+#define ROW2_NODE DT_ALIAS(row2)
+#define ROW3_NODE DT_ALIAS(row3)
+
+#define COLA_NODE DT_ALIAS(cola)
+#define COLB_NODE DT_ALIAS(colb)
+#define COLC_NODE DT_ALIAS(colc)
+
+#if !DT_NODE_HAS_STATUS_OKAY(ROW1_NODE)
+#error "row1 alias is not defined"
 #endif
-static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(SW0_NODE, gpios,
-							      {0});
-static struct gpio_callback button_cb_data;
+
+#if !DT_NODE_HAS_STATUS_OKAY(ROW2_NODE)
+#error "row2 alias is not defined"
+#endif
+
+#if !DT_NODE_HAS_STATUS_OKAY(ROW3_NODE)
+#error "row3 alias is not defined"
+#endif
+
+#if !DT_NODE_HAS_STATUS_OKAY(COLA_NODE)
+#error "cola alias is not defined"
+#endif
+
+#if !DT_NODE_HAS_STATUS_OKAY(COLB_NODE)
+#error "colb alias is not defined"
+#endif
+
+#if !DT_NODE_HAS_STATUS_OKAY(COLC_NODE)
+#error "colc alias is not defined"
+#endif
 
 /*
  * The led0 devicetree alias is optional. If present, we'll use it
@@ -36,46 +44,63 @@ static struct gpio_callback button_cb_data;
 static struct gpio_dt_spec led = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios,
 						     {0});
 
-void button_pressed(const struct device *dev, struct gpio_callback *cb,
-		    uint32_t pins)
-{
-	printk("Button pressed at %" PRIu32 "\n", k_cycle_get_32());
-}
+
+static const struct gpio_dt_spec row1 = GPIO_DT_SPEC_GET(ROW1_NODE, gpios);
+static const struct gpio_dt_spec row2 = GPIO_DT_SPEC_GET(ROW2_NODE, gpios);
+static const struct gpio_dt_spec row3 = GPIO_DT_SPEC_GET(ROW3_NODE, gpios);
+
+static const struct gpio_dt_spec cola = GPIO_DT_SPEC_GET(COLA_NODE, gpios);
+static const struct gpio_dt_spec colb = GPIO_DT_SPEC_GET(COLB_NODE, gpios);
+static const struct gpio_dt_spec colc = GPIO_DT_SPEC_GET(COLC_NODE, gpios);
 
 int main(void)
 {
 	int ret;
 
-	if (!gpio_is_ready_dt(&button)) {
-		printk("Error: button device %s is not ready\n",
-		       button.port->name);
+	if (!gpio_is_ready_dt(&row1) || !gpio_is_ready_dt(&row2) || !gpio_is_ready_dt(&row3) ||
+	    !gpio_is_ready_dt(&cola) || !gpio_is_ready_dt(&colb) || !gpio_is_ready_dt(&colc)) {
+		printk("One or more GPIO devices are not ready\n");
 		return 0;
 	}
 
-	ret = gpio_pin_configure_dt(&button, GPIO_INPUT);
-	if (ret != 0) {
-		printk("Error %d: failed to configure %s pin %d\n",
-		       ret, button.port->name, button.pin);
+	/* Rows: input + pull-up from devicetree */
+	ret = gpio_pin_configure_dt(&row1, GPIO_INPUT);
+	if (ret < 0) {
+		printk("Failed to configure row1: %d\n", ret);
 		return 0;
 	}
 
-	ret = gpio_pin_interrupt_configure_dt(&button,
-					      GPIO_INT_EDGE_TO_ACTIVE);
-	if (ret != 0) {
-		printk("Error %d: failed to configure interrupt on %s pin %d\n",
-			ret, button.port->name, button.pin);
+	ret = gpio_pin_configure_dt(&row2, GPIO_INPUT);
+	if (ret < 0) {
+		printk("Failed to configure row2: %d\n", ret);
 		return 0;
 	}
 
-	gpio_init_callback(&button_cb_data, button_pressed, BIT(button.pin));
-	gpio_add_callback(button.port, &button_cb_data);
-	printk("Set up button at %s pin %d\n", button.port->name, button.pin);
-
-	if (led.port && !gpio_is_ready_dt(&led)) {
-		printk("Error %d: LED device %s is not ready; ignoring it\n",
-		       ret, led.port->name);
-		led.port = NULL;
+	ret = gpio_pin_configure_dt(&row3, GPIO_INPUT);
+	if (ret < 0) {
+		printk("Failed to configure row3: %d\n", ret);
+		return 0;
 	}
+
+	/* Columns: active-low outputs, drive active (physical low). */
+	ret = gpio_pin_configure_dt(&cola, GPIO_OUTPUT_ACTIVE);
+	if (ret < 0) {
+		printk("Failed to configure cola: %d\n", ret);
+		return 0;
+	}
+
+	ret = gpio_pin_configure_dt(&colb, GPIO_OUTPUT_ACTIVE);
+	if (ret < 0) {
+		printk("Failed to configure colb: %d\n", ret);
+		return 0;
+	}
+
+	ret = gpio_pin_configure_dt(&colc, GPIO_OUTPUT_ACTIVE);
+	if (ret < 0) {
+		printk("Failed to configure colc: %d\n", ret);
+		return 0;
+	}
+
 	if (led.port) {
 		ret = gpio_pin_configure_dt(&led, GPIO_OUTPUT);
 		if (ret != 0) {
@@ -86,18 +111,29 @@ int main(void)
 			printk("Set up LED at %s pin %d\n", led.port->name, led.pin);
 		}
 	}
+	
 
-	printk("Press the button\n");
-	if (led.port) {
-		while (1) {
-			/* If we have an LED, match its state to the button's. */
-			int val = gpio_pin_get_dt(&button);
+	printk("Rows configured as pull-up inputs, columns active-low and driven low\n");
 
-			if (val >= 0) {
-				gpio_pin_set_dt(&led, val);
-			}
-			k_msleep(SLEEP_TIME_MS);
+	while (1) {
+		int r1 = gpio_pin_get_dt(&row1);
+		int r2 = gpio_pin_get_dt(&row2);
+		int r3 = gpio_pin_get_dt(&row3);
+
+		printk("row1=%d row2=%d row3=%d\n", r1, r2, r3);
+		if (r1 || r2 || r3)
+		{
+			gpio_pin_set_dt(&led, 1);
+			// if (val >= 0) {
+			// 	gpio_pin_set_dt(&led, val);
+			// }
 		}
+		else
+		{
+			gpio_pin_set_dt(&led, 0);
+		}
+		k_msleep(SLEEP_TIME_MS);
 	}
+
 	return 0;
 }
