@@ -5,6 +5,9 @@
 
 #define SLEEP_TIME_MS 10
 
+#define STACKSIZE 1024
+#define THREAD0_PRIORITY 7
+
 #define ROW1_NODE DT_ALIAS(row1)
 #define ROW2_NODE DT_ALIAS(row2)
 #define ROW3_NODE DT_ALIAS(row3)
@@ -60,6 +63,31 @@ static volatile bool row1_pressed;
 
 #define ROW1_DEBOUNCE_MS 15
 
+static struct gpio_dt_spec col_arr[] = {cola, colb, colc};
+int active_col = 0;
+static volatile uint8_t col_state[3] = {0, 0, 0};
+// col scan
+void scan_col()
+{
+	while (1) 
+	{
+        printk("Hello, I am thread0\n");
+		// should set it to inactive
+		gpio_pin_set_dt(&cola, 0);
+		gpio_pin_set_dt(&colb, 0);
+		gpio_pin_set_dt(&colc, 0);
+
+		// set one to true
+		gpio_pin_set_dt(&col_arr[active_col], 1);
+
+        k_msleep(1);
+		// advance column
+		active_col++;
+		if (active_col > 2)
+			active_col = 0;
+	}
+}
+
 // define callback function for interrupt on 'button'
 void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
@@ -67,7 +95,8 @@ void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t
 	ARG_UNUSED(cb);
 	ARG_UNUSED(pins);
 
-	if (row1_debounce_pending) {
+	if (row1_debounce_pending) 
+	{
 		return;
 	}
 
@@ -84,6 +113,7 @@ static void row1_debounce_handler(struct k_work *work)
 	pressed = gpio_pin_get_dt(&row1);
 	if (pressed > 0) 
 	{
+		printk("");
 		if (!row1_pressed) 
 		{
 			row1_pressed = true;
@@ -194,3 +224,7 @@ int main(void)
 
 	return 0;
 }
+
+
+K_THREAD_DEFINE(thread0_id, STACKSIZE, scan_col, NULL, NULL, NULL,
+		THREAD0_PRIORITY, 0, 0);
