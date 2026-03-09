@@ -3,7 +3,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/printk.h>
 
-#define SLEEP_TIME_MS 100
+#define SLEEP_TIME_MS 10
 
 #define ROW1_NODE DT_ALIAS(row1)
 #define ROW2_NODE DT_ALIAS(row2)
@@ -52,6 +52,53 @@ static const struct gpio_dt_spec row3 = GPIO_DT_SPEC_GET(ROW3_NODE, gpios);
 static const struct gpio_dt_spec cola = GPIO_DT_SPEC_GET(COLA_NODE, gpios);
 static const struct gpio_dt_spec colb = GPIO_DT_SPEC_GET(COLB_NODE, gpios);
 static const struct gpio_dt_spec colc = GPIO_DT_SPEC_GET(COLC_NODE, gpios);
+
+static struct gpio_callback button_cb_data;
+static struct k_work_delayable row1_debounce_work;
+static volatile bool row1_debounce_pending;
+static volatile bool row1_pressed;
+
+#define ROW1_DEBOUNCE_MS 15
+
+// define callback function for interrupt on 'button'
+void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
+{
+	ARG_UNUSED(dev);
+	ARG_UNUSED(cb);
+	ARG_UNUSED(pins);
+
+	if (row1_debounce_pending) {
+		return;
+	}
+
+	row1_debounce_pending = true;
+	k_work_schedule(&row1_debounce_work, K_MSEC(ROW1_DEBOUNCE_MS));
+}
+
+static void row1_debounce_handler(struct k_work *work)
+{
+	int pressed;
+
+	ARG_UNUSED(work);
+
+	pressed = gpio_pin_get_dt(&row1);
+	if (pressed > 0) 
+	{
+		if (!row1_pressed) 
+		{
+			row1_pressed = true;
+			gpio_pin_toggle_dt(&led);
+		}
+	} 
+	else if (pressed == 0) 
+	{
+		row1_pressed = false;
+	}
+
+	row1_debounce_pending = false;
+}
+
+
 
 int main(void)
 {
@@ -115,23 +162,33 @@ int main(void)
 
 	printk("Rows configured as pull-up inputs, columns active-low and driven low\n");
 
-	while (1) {
-		int r1 = gpio_pin_get_dt(&row1);
-		int r2 = gpio_pin_get_dt(&row2);
-		int r3 = gpio_pin_get_dt(&row3);
+	// configure interrupts
+	// TODO change 'button'
+	// associate 'button' with the interrupt
+	k_work_init_delayable(&row1_debounce_work, row1_debounce_handler);
+	ret = gpio_pin_interrupt_configure_dt(&row1, GPIO_INT_EDGE_BOTH);
+	// init callback
+	gpio_init_callback(&button_cb_data, button_pressed, BIT(row1.pin)); 	
+	// add callback
+	gpio_add_callback(row1.port, &button_cb_data);
 
-		printk("row1=%d row2=%d row3=%d\n", r1, r2, r3);
-		if (r1 || r2 || r3)
-		{
-			gpio_pin_set_dt(&led, 1);
-			// if (val >= 0) {
-			// 	gpio_pin_set_dt(&led, val);
-			// }
-		}
-		else
-		{
-			gpio_pin_set_dt(&led, 0);
-		}
+	while (1) {
+		// int r1 = gpio_pin_get_dt(&row1);
+		// int r2 = gpio_pin_get_dt(&row2);
+		// int r3 = gpio_pin_get_dt(&row3);
+
+		// printk("row1=%d row2=%d row3=%d\n", r1, r2, r3);
+		// if (r1 || r2 || r3)
+		// {
+		// 	gpio_pin_set_dt(&led, 1);
+		// 	// if (val >= 0) {
+		// 	// 	gpio_pin_set_dt(&led, val);
+		// 	// }
+		// }
+		// else
+		// {
+		// 	gpio_pin_set_dt(&led, 0);
+		// }
 		k_msleep(SLEEP_TIME_MS);
 	}
 
